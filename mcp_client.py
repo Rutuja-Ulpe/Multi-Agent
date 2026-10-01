@@ -1,9 +1,16 @@
 import os
+import sys
 import asyncio
 import certifi
+
 from dotenv import load_dotenv
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_groq import ChatGroq
+
+
+# ============================================================
+# SSL CONFIGURATION
+# ============================================================
 
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
@@ -11,60 +18,91 @@ os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 load_dotenv()
 
 
+# ============================================================
+# API KEYS
+# ============================================================
+
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 AVIATION_STACK_API_KEY = os.getenv("AVIATIONSTACK_API_KEY")
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 
+# ============================================================
 # LLM
+# ============================================================
+
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model="openai/gpt-oss-120b",
     api_key=GROQ_API_KEY
 )
 
 
+# ============================================================
+# MCP CLIENT
+# ============================================================
+
 client = MultiServerMCPClient(
     {
+        # ----------------------------------------------------
+        # TAVILY MCP
+        # ----------------------------------------------------
         "tavily": {
             "transport": "streamable_http",
-            "url": f"https://mcp.tavily.com/mcp/?tavilyApiKey={TAVILY_API_KEY}"
+            "url": (
+                f"https://mcp.tavily.com/mcp/"
+                f"?tavilyApiKey={TAVILY_API_KEY}"
+            )
         },
 
+        # ----------------------------------------------------
+        # AVIATIONSTACK MCP
+        # ----------------------------------------------------
         "aviationstack": {
             "transport": "stdio",
-            "command": "uvx",
+
+            # IMPORTANT:
+            # Use the exact uvx.exe path that worked
+            # in test_aviation.py
+            "command": r"C:\Users\Rutuja\.local\bin\uvx.exe",
+
             "args": [
                 "aviationstack-mcp"
             ],
+
             "env": {
                 "AVIATION_STACK_API_KEY": AVIATION_STACK_API_KEY
             }
         },
 
-         "weather": {
+        # ----------------------------------------------------
+        # WEATHER MCP
+        # ----------------------------------------------------
+        "weather": {
             "transport": "stdio",
-            "command": r"C:\Anaconda3\envs\travel\python.exe",
+
+            # Use the Python interpreter running this project
+            "command": sys.executable,
+
             "args": [
-                r"D:\Bappy\Coding\Youtube\Deployments\TripMate-AI-Using-MCP\custom_weather_mcp_server.py"
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "custom_weather_mcp_server.py"
+                )
             ],
+
             "env": {
                 "OPENWEATHER_API_KEY": OPENWEATHER_API_KEY
             }
         }
-
-        
-
-        
-
     }
-
 )
 
 
+# ============================================================
+# CHECK ALL MCP TOOLS
+# ============================================================
 
-
-# Check if the client is connected to all servers
 async def get_all_tools():
 
     tools = await client.get_tools()
@@ -75,15 +113,13 @@ async def get_all_tools():
         print(tool.name)
 
 
-
-
-###################################
-# Tavlily and Aviation Tools
-###################################
-
+# ============================================================
+# TAVILY AND AVIATION TOOLS
+# ============================================================
 
 search_tool = None
 aviation_tools = {}
+
 
 async def initialize_mcp():
 
@@ -113,18 +149,17 @@ async def initialize_mcp():
     }
 
 
-
-
 async def tavily_mcp_search(query: str):
+
     await initialize_mcp()
+
     result = await search_tool.ainvoke(
         {
             "query": query
         }
     )
+
     return result
-
-
 
 
 async def aviation_mcp_call(
@@ -146,13 +181,9 @@ async def aviation_mcp_call(
     return result
 
 
-
-
-
-
-###################################
-# Weather Tools
-###################################
+# ============================================================
+# WEATHER TOOLS
+# ============================================================
 
 weather_tool = None
 forecast_tool = None
@@ -160,9 +191,10 @@ forecast_tool = None
 
 async def initialize_weather_tools():
 
-    global weather_tool, forecast_tool
+    global weather_tool
+    global forecast_tool
 
-    if weather_tool is not None:
+    if weather_tool is not None and forecast_tool is not None:
         return
 
     tools = await client.get_tools()
@@ -200,25 +232,30 @@ async def forecast_mcp_search(city: str):
     )
 
 
-
-
-###################################
-# Destination Extractor
-###################################
+# ============================================================
+# DESTINATION EXTRACTOR
+# ============================================================
 
 def extract_destination(query: str):
 
     prompt = f"""
-    Extract only the destination city or country.
+Extract only the destination city or country.
 
-    Query:
-    {query}
+Query:
+{query}
 
-    Return only destination name.
-    """
+Return only destination name.
+"""
 
     response = llm.invoke(prompt)
 
     return response.content.strip()
 
 
+# ============================================================
+# TEST
+# ============================================================
+
+if __name__ == "__main__":
+
+    asyncio.run(get_all_tools())
